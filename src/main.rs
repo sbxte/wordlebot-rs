@@ -425,9 +425,16 @@ fn handle_calc(state: &MatchState) {
     scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
 
     println!();
-    println!("Displaying top 30 options");
-    for (i, (word, score)) in scores.iter().enumerate().take(30) {
-        println!("{i}: {score} {word}");
+    println!("Displaying top 25 options");
+    for (i, (word, score)) in scores.iter().enumerate().take(25) {
+        println!("{}. {score} {word}", i + 1);
+    }
+
+    if rem <= 10 {
+        println!("{rem} possible answers remaining");
+        for (i, word) in words.iter().filter(|w| state.matches(**w)).enumerate() {
+            println!("{}. {word}", i + 1);
+        }
     }
 }
 
