@@ -159,13 +159,6 @@ impl MatchState {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct Word([u8; WORD_LENGTH]);
 
-impl Word {
-    fn from_str(word: &str) -> Self {
-        let bytes = word.as_bytes();
-        Self([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]])
-    }
-}
-
 impl std::fmt::Display for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -337,10 +330,7 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> ScoreResu
 
         let mut total_expected_info = 0.;
         for (k, v) in &matches {
-            let mc = MatchComb {
-                state: &state,
-                wm: k,
-            };
+            let mc = MatchComb { state, wm: k };
             let remaining = words.iter().filter(|w| mc.matches(**w)).count();
             if remaining == 0 {
                 continue;
@@ -367,7 +357,7 @@ fn word_match(word: Word, target: Word) -> WordMatch {
     for (i, wc) in word.0.iter().enumerate() {
         result[i] = if *wc == target.0[i] {
             CharMatch::Green
-        } else if target.0.iter().find(|tc| **tc == *wc).is_some() {
+        } else if target.0.contains(wc) {
             CharMatch::Yellow
         } else {
             CharMatch::Gray
@@ -378,9 +368,7 @@ fn word_match(word: Word, target: Word) -> WordMatch {
 
 const THREADS: usize = 12;
 fn handle_calc(state: &MatchState) {
-    let words = include_str!("words.txt");
-
-    let words = parse_words(&words);
+    let words = parse_words(include_str!("words.txt"));
 
     let len = words.len();
     let n = words.len() / THREADS;
@@ -397,7 +385,7 @@ fn handle_calc(state: &MatchState) {
         let mut threads = Vec::with_capacity(THREADS);
 
         for i in 0..THREADS - 1 {
-            let builder = std::thread::Builder::new().name(format!("{}", i));
+            let builder = std::thread::Builder::new().name(format!("{i}"));
             threads.push(
                 builder
                     .spawn_scoped(s, move || {
@@ -408,7 +396,7 @@ fn handle_calc(state: &MatchState) {
         }
         threads.push(
             std::thread::Builder::new()
-                .name(format!("{}", THREADS))
+                .name(format!("{THREADS}"))
                 .spawn_scoped(s, move || {
                     sort_scores(state, &words[n * (THREADS - 1)..], words)
                 })
