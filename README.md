@@ -14,8 +14,6 @@ For interactive mode, run
 ```
 cargo r -r -- run
 ```
-```
-```
 
 
 Example video showcasing how to use it:
