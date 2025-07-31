@@ -40,10 +40,6 @@ impl MatchState {
             && self.somewhere.iter().all(|b| word.0.contains(b))
     }
 
-    fn is_win(&self) -> bool {
-        self.chars.iter().all(|c| matches!(c, CharInfo::Is(_)))
-    }
-
     fn serialize(&self) -> String {
         let mut buffer = String::new();
 
@@ -78,7 +74,7 @@ impl MatchState {
                 if !not.is_empty() {
                     buffer.push(not[0] as char);
                     for b in &not[1..] {
-                        buffer.push(' ');
+                        buffer.push(',');
                         buffer.push(*b as char);
                     }
                 }
@@ -198,6 +194,10 @@ struct WordMatch {
 }
 
 impl WordMatch {
+    fn is_win(&self) -> bool {
+        self.cm.iter().all(|cm| matches!(cm, CharMatch::Green))
+    }
+
     fn matches(&self, target: Word) -> bool {
         // God, this has been the most mind-melding thing this morning
         self.cm.iter().enumerate().all(|(i, cm)| match cm {
@@ -288,10 +288,9 @@ impl<'a, 'b> MatchComb<'a, 'b> {
     }
 }
 
-fn parse_words(input: &str, state: &MatchState) -> Vec<Word> {
+fn parse_words(input: &str) -> Vec<Word> {
     let words: Vec<_> = input
         .lines()
-        .filter(|s| state.matches(Word::from_str(s)))
         .map(|s| {
             let bytes = s.as_bytes();
             Word([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4]])
@@ -300,14 +299,21 @@ fn parse_words(input: &str, state: &MatchState) -> Vec<Word> {
     words
 }
 
-fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> Vec<(Word, f64)> {
+enum ScoreResult {
+    Sorted(Vec<(Word, f64)>),
+    Win(Word),
+}
+
+fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> ScoreResult {
     let mut matches = HashMap::new();
     let mut scores = Vec::with_capacity(words.len());
 
+    let all = words.iter().filter(|w| state.matches(**w)).count();
+
     let mut prev_prog = 0.;
     for (wi, word) in search.iter().enumerate() {
-        let progress = ((wi as f64) / (search.len() as f64) * 100.).round();
-        if progress > prev_prog + 5. {
+        let progress = ((wi as f64) / (search.len() as f64) * 100.).floor();
+        if progress >= prev_prog + 5. {
             eprintln!(
                 "Thread#{} {progress}% searched {wi}",
                 std::thread::current().name().unwrap()
@@ -316,8 +322,8 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> Vec<(Word
         }
 
         matches.clear();
-        for target in words {
-            let result = word_match(word.clone(), target.clone());
+        for target in words.iter().filter(|w| state.matches(**w)) {
+            let result = word_match(*word, *target);
             use std::collections::hash_map::Entry;
             match matches.entry(result) {
                 Entry::Vacant(e) => {
@@ -336,7 +342,12 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> Vec<(Word
                 wm: k,
             };
             let remaining = words.iter().filter(|w| mc.matches(**w)).count();
-            let all = words.len();
+            if remaining == 0 {
+                continue;
+            }
+            if *v == all && k.is_win() {
+                return ScoreResult::Win(k.word);
+            }
 
             let bits = -((remaining as f64) / (all as f64)).log2();
             let probability = (*v as f64) / (all as f64);
@@ -348,7 +359,7 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> Vec<(Word
     }
 
     scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
-    scores
+    ScoreResult::Sorted(scores)
 }
 
 fn word_match(word: Word, target: Word) -> WordMatch {
@@ -369,13 +380,16 @@ const THREADS: usize = 12;
 fn handle_calc(state: &MatchState) {
     let words = include_str!("words.txt");
 
-    let words = parse_words(&words, &state);
+    let words = parse_words(&words);
 
     let len = words.len();
     let n = words.len() / THREADS;
-    println!("{len} words to search, {n} per thread");
+
+    let rem = words.iter().filter(|w| state.matches(**w)).count();
+    println!("{rem} remaining words to search");
 
     let mut scores = Vec::with_capacity(len);
+    let mut win = None;
 
     std::thread::scope(|s| {
         let words = &words[..];
@@ -403,13 +417,25 @@ fn handle_calc(state: &MatchState) {
 
         for thread in threads {
             if let Ok(x) = thread.join() {
-                scores.extend(x);
+                match x {
+                    ScoreResult::Sorted(s) => scores.extend(s),
+                    ScoreResult::Win(w) => {
+                        win = Some(w);
+                    }
+                }
             }
         }
     });
+    if let Some(w) = win {
+        println!("Winning word found: {w}");
+        return;
+    }
+
     scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
 
-    for (i, (word, score)) in scores.iter().enumerate() {
+    println!();
+    println!("Displaying top 30 options");
+    for (i, (word, score)) in scores.iter().enumerate().take(30) {
         println!("{i}: {score} {word}");
     }
 }
