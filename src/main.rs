@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Read;
+use std::num::NonZeroUsize;
 
 use clap::{Command, command};
 
@@ -366,12 +367,14 @@ fn word_match(word: Word, target: Word) -> WordMatch {
     WordMatch { cm: result, word }
 }
 
-const THREADS: usize = 12;
 fn handle_calc(state: &MatchState) {
+    let threads: usize = std::thread::available_parallelism()
+        .unwrap_or(NonZeroUsize::new(1).unwrap())
+        .get();
     let words = parse_words(include_str!("words.txt"));
 
     let len = words.len();
-    let n = words.len() / THREADS;
+    let n = words.len() / threads;
 
     let rem = words.iter().filter(|w| state.matches(**w)).count();
     println!("{rem} remaining words to search");
@@ -382,11 +385,11 @@ fn handle_calc(state: &MatchState) {
     std::thread::scope(|s| {
         let words = &words[..];
         let state = &state;
-        let mut threads = Vec::with_capacity(THREADS);
+        let mut handles = Vec::with_capacity(threads);
 
-        for i in 0..THREADS - 1 {
+        for i in 0..threads - 1 {
             let builder = std::thread::Builder::new().name(format!("{}", i + 1));
-            threads.push(
+            handles.push(
                 builder
                     .spawn_scoped(s, move || {
                         sort_scores(state, &words[n * i..n * (i + 1)], words)
@@ -394,16 +397,16 @@ fn handle_calc(state: &MatchState) {
                     .unwrap(),
             );
         }
-        threads.push(
+        handles.push(
             std::thread::Builder::new()
-                .name(format!("{THREADS}"))
+                .name(format!("{threads}"))
                 .spawn_scoped(s, move || {
-                    sort_scores(state, &words[n * (THREADS - 1)..], words)
+                    sort_scores(state, &words[n * (threads - 1)..], words)
                 })
                 .unwrap(),
         );
 
-        for thread in threads {
+        for thread in handles {
             if let Ok(x) = thread.join() {
                 match x {
                     ScoreResult::Sorted(s) => scores.extend(s),
