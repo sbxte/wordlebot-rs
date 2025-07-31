@@ -385,7 +385,7 @@ fn handle_calc(state: &MatchState) {
         let mut threads = Vec::with_capacity(THREADS);
 
         for i in 0..THREADS - 1 {
-            let builder = std::thread::Builder::new().name(format!("{i}"));
+            let builder = std::thread::Builder::new().name(format!("{}", i + 1));
             threads.push(
                 builder
                     .spawn_scoped(s, move || {
