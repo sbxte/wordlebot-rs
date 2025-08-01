@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io::Read;
-use std::num::NonZeroUsize;
 
 use clap::{Command, command};
 
@@ -369,8 +368,8 @@ fn word_match(word: Word, target: Word) -> WordMatch {
 
 fn handle_calc(state: &MatchState) {
     let threads: usize = std::thread::available_parallelism()
-        .unwrap_or(NonZeroUsize::new(1).unwrap())
-        .get();
+        .map(|x| x.get())
+        .unwrap_or(1);
     let words = parse_words(include_str!("words.txt"));
 
     let len = words.len();
