@@ -370,12 +370,21 @@ fn handle_calc(state: &MatchState) {
     let threads: usize = std::thread::available_parallelism()
         .map(|x| x.get())
         .unwrap_or(1);
+
     let words = parse_words(include_str!("words.txt"));
+    if words.is_empty() {
+        panic!("No word dictionary found!");
+    }
+
+    let valid = {
+        let v = parse_words(include_str!("valid.txt"));
+        if v.is_empty() { words.clone() } else { v }
+    };
 
     let len = words.len();
     let n = words.len() / threads;
 
-    let rem = words.iter().filter(|w| state.matches(**w)).count();
+    let rem = valid.iter().filter(|w| state.matches(**w)).count();
     println!("{rem} remaining words to search");
 
     let mut scores = Vec::with_capacity(len);
@@ -383,6 +392,7 @@ fn handle_calc(state: &MatchState) {
 
     std::thread::scope(|s| {
         let words = &words[..];
+        let valid = &valid[..];
         let state = &state;
         let mut handles = Vec::with_capacity(threads);
 
@@ -391,7 +401,7 @@ fn handle_calc(state: &MatchState) {
             handles.push(
                 builder
                     .spawn_scoped(s, move || {
-                        sort_scores(state, &words[n * i..n * (i + 1)], words)
+                        sort_scores(state, &words[n * i..n * (i + 1)], valid)
                     })
                     .unwrap(),
             );
@@ -400,7 +410,7 @@ fn handle_calc(state: &MatchState) {
             std::thread::Builder::new()
                 .name(format!("{threads}"))
                 .spawn_scoped(s, move || {
-                    sort_scores(state, &words[n * (threads - 1)..], words)
+                    sort_scores(state, &words[n * (threads - 1)..], valid)
                 })
                 .unwrap(),
         );
@@ -431,7 +441,7 @@ fn handle_calc(state: &MatchState) {
 
     if rem <= 10 {
         println!("{rem} possible answers remaining");
-        for (i, word) in words.iter().filter(|w| state.matches(**w)).enumerate() {
+        for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
             println!("{}. {word}", i + 1);
         }
     }
