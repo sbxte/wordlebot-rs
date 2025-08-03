@@ -439,8 +439,8 @@ fn handle_calc(state: &MatchState) {
         println!("{}. {score} {word}", i + 1);
     }
 
+    println!("{rem} possible answers remaining");
     if rem <= 10 {
-        println!("{rem} possible answers remaining");
         for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
             println!("{}. {word}", i + 1);
         }
