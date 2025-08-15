@@ -440,7 +440,7 @@ fn handle_calc(state: &MatchState) {
     }
 
     println!("{rem} possible answers remaining");
-    if rem <= 10 {
+    if rem <= 20 {
         for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
             println!("{}. {word}", i + 1);
         }
