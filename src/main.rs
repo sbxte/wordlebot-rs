@@ -381,6 +381,42 @@ fn handle_calc(state: &MatchState) {
         if v.is_empty() { words.clone() } else { v }
     };
 
+    let SearchResult {
+        mut scores,
+        mut win,
+        words_remaining: mut rem,
+    } = search(&words, &valid, threads, state);
+    if rem == 0 {
+        println!("No answer found in valid.txt, falling back to words.txt");
+        SearchResult {
+            scores,
+            win,
+            words_remaining: rem,
+        } = search(&words, &words, threads, state);
+    }
+
+    if let Some(w) = win {
+        println!("Winning word found: {w}");
+        return;
+    }
+
+    scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
+
+    println!();
+    println!("Displaying top 25 options");
+    for (i, (word, score)) in scores.iter().enumerate().take(25) {
+        println!("{}. {score} {word}", i + 1);
+    }
+
+    println!("{rem} possible answers remaining");
+    if rem <= 20 {
+        for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
+            println!("{}. {word}", i + 1);
+        }
+    }
+}
+
+fn search(words: &[Word], valid: &[Word], threads: usize, state: &MatchState) -> SearchResult {
     let len = words.len();
     let n = words.len() / threads;
 
@@ -426,25 +462,18 @@ fn handle_calc(state: &MatchState) {
             }
         }
     });
-    if let Some(w) = win {
-        println!("Winning word found: {w}");
-        return;
-    }
 
-    scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
-
-    println!();
-    println!("Displaying top 25 options");
-    for (i, (word, score)) in scores.iter().enumerate().take(25) {
-        println!("{}. {score} {word}", i + 1);
+    SearchResult {
+        scores,
+        win,
+        words_remaining: rem,
     }
+}
 
-    println!("{rem} possible answers remaining");
-    if rem <= 20 {
-        for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
-            println!("{}. {word}", i + 1);
-        }
-    }
+struct SearchResult {
+    scores: Vec<(Word, f64)>,
+    win: Option<Word>,
+    words_remaining: usize,
 }
 
 fn handle_merge() {
