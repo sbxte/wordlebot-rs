@@ -1,12 +1,10 @@
 use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::io::Read;
 
 use clap::{Command, command};
 
 const WORD_LENGTH: usize = 5;
-
-const VALID_WORDS: &'static str = include_str!("valid.txt");
-const INPUT_WORDS: &'static str = include_str!("words.txt");
 
 #[derive(Debug, Clone)]
 enum CharInfo {
@@ -373,19 +371,16 @@ fn word_match(word: Word, target: Word) -> WordMatch {
     WordMatch { cm: result, word }
 }
 
-fn default_search(state: &MatchState) -> SearchResult {
+fn default_search(state: &MatchState, valid_words: &[Word], answer_words: &[Word]) -> SearchResult {
     let threads: usize = std::thread::available_parallelism()
         .map(|x| x.get())
         .unwrap_or(1);
 
-    let words = parse_words(INPUT_WORDS);
-    if words.is_empty() {
-        panic!("No word dictionary found!");
-    }
-
-    let valid = {
-        let v = parse_words(VALID_WORDS);
-        if v.is_empty() { words.clone() } else { v }
+    let words = valid_words;
+    let valid = if answer_words.is_empty() {
+        valid_words
+    } else {
+        answer_words
     };
 
     let SearchResult {
@@ -411,12 +406,12 @@ fn default_search(state: &MatchState) -> SearchResult {
     }
 }
 
-fn handle_calc(state: &MatchState) -> SearchResult {
+fn handle_calc(state: &MatchState, valid_words: &[Word], answer_words: &[Word]) -> SearchResult {
     let SearchResult {
         scores,
         win,
         words_remaining,
-    } = default_search(state);
+    } = default_search(state, valid_words, answer_words);
 
     if let Some(w) = win {
         println!("Winning word found: {w}");
@@ -554,7 +549,7 @@ fn get_stdin(buffer: &mut String) {
     std::io::stdin().read_line(buffer).unwrap();
 }
 
-fn handle_run() {
+fn handle_run(valid_words: &[Word], answer_words: &[Word]) {
     let mut buffer = String::new();
     let mut state = MatchState::empty();
     let mut last_search_result = SearchResult {
@@ -596,14 +591,14 @@ fn handle_run() {
                 println!("Current state: {}", state.serialize());
             }
             'c' => {
-                last_search_result = handle_calc(&state);
+                last_search_result = handle_calc(&state, valid_words, answer_words);
             }
             'w' => {
                 if last_search_result.words_remaining == usize::MAX {
                     println!("Compute scores first!");
                     return;
                 }
-                
+
                 println!("Enter word to calculate its score:");
                 get_stdin(&mut buffer);
                 let mut s = [0; WORD_LENGTH];
@@ -658,6 +653,29 @@ fn handle_run() {
 }
 
 fn main() {
+    let mut buffer = String::new();
+    let valid_words = {
+        let mut f = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open("words.txt")
+            .expect("Unable to find or open words.txt");
+        f.read_to_string(&mut buffer)
+            .expect("Unable to read words.txt");
+        parse_words(buffer.as_str())
+    };
+
+    let answer_words = {
+        let mut f = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open("answers.txt")
+            .expect("Unable to find or open answers.txt");
+        f.read_to_string(&mut buffer)
+            .expect("Unable to read answers.txt");
+        parse_words(buffer.as_str())
+    };
+
     let matches = command!()
         .subcommand(Command::new("merge"))
         .subcommand(Command::new("calc"))
@@ -670,9 +688,9 @@ fn main() {
             let mut buffer = String::new();
             get_stdin(&mut buffer);
             let state = MatchState::deserialize(&buffer);
-            handle_calc(&state);
+            handle_calc(&state, &valid_words, &answer_words);
         }
-        Some(("run", _subm)) => handle_run(),
+        Some(("run", _subm)) => handle_run(&valid_words, &answer_words),
         _ => {}
     }
 }
