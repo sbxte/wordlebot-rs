@@ -435,12 +435,8 @@ fn handle_calc(state: &MatchState) -> SearchResult {
 
     println!("{words_remaining} possible answers remaining");
     if words_remaining <= 20 {
-        for (i, word) in parse_words(VALID_WORDS)
-            .iter()
-            .filter(|w| state.matches(**w))
-            .enumerate()
-        {
-            println!("{}. {word}", i + 1);
+        for (i, (w, _)) in scores.iter().filter(|(w, _)| state.matches(*w)).enumerate() {
+            println!("{}. {}", i + 1, w);
         }
     }
 
