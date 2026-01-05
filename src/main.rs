@@ -5,6 +5,9 @@ use clap::{Command, command};
 
 const WORD_LENGTH: usize = 5;
 
+const VALID_WORDS: &'static str = include_str!("valid.txt");
+const INPUT_WORDS: &'static str = include_str!("words.txt");
+
 #[derive(Debug, Clone)]
 enum CharInfo {
     Is(u8),
@@ -371,13 +374,13 @@ fn handle_calc(state: &MatchState) {
         .map(|x| x.get())
         .unwrap_or(1);
 
-    let words = parse_words(include_str!("words.txt"));
+    let words = parse_words(INPUT_WORDS);
     if words.is_empty() {
         panic!("No word dictionary found!");
     }
 
     let valid = {
-        let v = parse_words(include_str!("valid.txt"));
+        let v = parse_words(VALID_WORDS);
         if v.is_empty() { words.clone() } else { v }
     };
 
@@ -414,6 +417,47 @@ fn handle_calc(state: &MatchState) {
             println!("{}. {word}", i + 1);
         }
     }
+}
+
+fn handle_calc_word(state: &MatchState, word: Word) {
+    let threads: usize = std::thread::available_parallelism()
+        .map(|x| x.get())
+        .unwrap_or(1);
+
+    let words = parse_words(INPUT_WORDS);
+    if words.is_empty() {
+        panic!("No word dictionary found!");
+    }
+
+    let valid = {
+        let v = parse_words(VALID_WORDS);
+        if v.is_empty() { words.clone() } else { v }
+    };
+
+    let SearchResult {
+        scores,
+        win,
+        words_remaining,
+    } = search(&words, &valid, threads, state);
+
+    if let Some(w) = win {
+        println!("Winning word found: {w}");
+        return;
+    }
+
+    let (ranking, (_, score)) = if let Some(s) = scores.iter().enumerate().find(|(idx, e)| e.0 == word) { s } else {
+        println!("Word is an invalid word!");
+        return;
+    };
+    let score = *score;
+
+    println!();
+    println!("\"{}\" has a score of {} and is ranked {}", word, score, ranking + 1);
+    println!(
+        "on average the word eliminates {} out of {} remaining possible words",
+        words_remaining - (words_remaining as f64 / (2.0f64.powf(score))).ceil() as usize,
+        words_remaining
+    );
 }
 
 fn search(words: &[Word], valid: &[Word], threads: usize, state: &MatchState) -> SearchResult {
@@ -500,6 +544,7 @@ fn handle_run() {
         println!("(a) Add info");
         println!("(v) View state");
         println!("(c) Calc");
+        println!("(w) Calculate stats for a word");
         println!("(r) Reset");
         println!("(q) Quit");
         println!("Enter input:");
@@ -528,6 +573,15 @@ fn handle_run() {
             }
             'c' => {
                 handle_calc(&state);
+            }
+            'w' => {
+                println!("Enter word to calculate:");
+                buffer.clear();
+                std::io::stdin().read_line(&mut buffer).unwrap();
+                let mut s = [0; WORD_LENGTH];
+                s.copy_from_slice(buffer.trim().as_bytes());
+                let word = Word(s);
+                handle_calc_word(&state, word);
             }
             'r' => {
                 state = MatchState::empty();
