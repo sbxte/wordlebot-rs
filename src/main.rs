@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -304,21 +306,7 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> ScoreResu
 
     let all = words.iter().filter(|w| state.matches(**w)).count();
 
-    #[cfg(feature = "dbg_progress")]
-    let mut prev_prog = 0.;
-    for (wi, word) in search.iter().enumerate() {
-        #[cfg(feature = "dbg_progress")]
-        {
-            let progress = ((wi as f64) / (search.len() as f64) * 100.).floor();
-            if progress >= prev_prog + 25. {
-                eprintln!(
-                    "Thread#{} {progress}% searched {wi}",
-                    std::thread::current().name().unwrap()
-                );
-                prev_prog = progress;
-            }
-        }
-
+    for word in search.iter() {
         matches.clear();
         for target in words.iter().filter(|w| state.matches(**w)) {
             let result = word_match(*word, *target);
@@ -387,14 +375,14 @@ fn default_search(state: &MatchState, valid_words: &[Word], answer_words: &[Word
         mut scores,
         mut win,
         mut words_remaining,
-    } = search(&words, &valid, threads, state);
+    } = search(words, valid, threads, state);
     if words_remaining == 0 {
         println!("No answer found in valid.txt, falling back to words.txt");
         SearchResult {
             scores,
             win,
             words_remaining,
-        } = search(&words, &words, threads, state);
+        } = search(words, words, threads, state);
     }
 
     scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
@@ -479,8 +467,6 @@ fn search(words: &[Word], valid: &[Word], threads: usize, state: &MatchState) ->
     let mut win = None;
 
     std::thread::scope(|s| {
-        let words = &words[..];
-        let valid = &valid[..];
         let state = &state;
         let mut handles = Vec::with_capacity(threads);
 
