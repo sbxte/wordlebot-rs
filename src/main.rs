@@ -306,15 +306,19 @@ fn sort_scores(state: &MatchState, search: &[Word], words: &[Word]) -> ScoreResu
 
     let all = words.iter().filter(|w| state.matches(**w)).count();
 
+    #[cfg(feature = "dbg_progress")]
     let mut prev_prog = 0.;
     for (wi, word) in search.iter().enumerate() {
-        let progress = ((wi as f64) / (search.len() as f64) * 100.).floor();
-        if progress >= prev_prog + 5. {
-            eprintln!(
-                "Thread#{} {progress}% searched {wi}",
-                std::thread::current().name().unwrap()
-            );
-            prev_prog = progress;
+        #[cfg(feature = "dbg_progress")]
+        {
+            let progress = ((wi as f64) / (search.len() as f64) * 100.).floor();
+            if progress >= prev_prog + 25. {
+                eprintln!(
+                    "Thread#{} {progress}% searched {wi}",
+                    std::thread::current().name().unwrap()
+                );
+                prev_prog = progress;
+            }
         }
 
         matches.clear();
@@ -369,7 +373,7 @@ fn word_match(word: Word, target: Word) -> WordMatch {
     WordMatch { cm: result, word }
 }
 
-fn handle_calc(state: &MatchState) {
+fn default_search(state: &MatchState) -> SearchResult {
     let threads: usize = std::thread::available_parallelism()
         .map(|x| x.get())
         .unwrap_or(1);
@@ -387,23 +391,41 @@ fn handle_calc(state: &MatchState) {
     let SearchResult {
         mut scores,
         mut win,
-        words_remaining: mut rem,
+        mut words_remaining,
     } = search(&words, &valid, threads, state);
-    if rem == 0 {
+    if words_remaining == 0 {
         println!("No answer found in valid.txt, falling back to words.txt");
         SearchResult {
             scores,
             win,
-            words_remaining: rem,
+            words_remaining,
         } = search(&words, &words, threads, state);
     }
 
+    scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
+
+    SearchResult {
+        scores,
+        win,
+        words_remaining,
+    }
+}
+
+fn handle_calc(state: &MatchState) -> SearchResult {
+    let SearchResult {
+        scores,
+        win,
+        words_remaining,
+    } = default_search(state);
+
     if let Some(w) = win {
         println!("Winning word found: {w}");
-        return;
+        return SearchResult {
+            scores,
+            win,
+            words_remaining,
+        };
     }
-
-    scores.sort_unstable_by(|(_, e1), (_, e2)| e1.total_cmp(e2).reverse());
 
     println!();
     println!("Displaying top 25 options");
@@ -411,52 +433,47 @@ fn handle_calc(state: &MatchState) {
         println!("{}. {score} {word}", i + 1);
     }
 
-    println!("{rem} possible answers remaining");
-    if rem <= 20 {
-        for (i, word) in valid.iter().filter(|w| state.matches(**w)).enumerate() {
+    println!("{words_remaining} possible answers remaining");
+    if words_remaining <= 20 {
+        for (i, word) in parse_words(VALID_WORDS)
+            .iter()
+            .filter(|w| state.matches(**w))
+            .enumerate()
+        {
             println!("{}. {word}", i + 1);
         }
     }
-}
 
-fn handle_calc_word(state: &MatchState, word: Word) {
-    let threads: usize = std::thread::available_parallelism()
-        .map(|x| x.get())
-        .unwrap_or(1);
-
-    let words = parse_words(INPUT_WORDS);
-    if words.is_empty() {
-        panic!("No word dictionary found!");
-    }
-
-    let valid = {
-        let v = parse_words(VALID_WORDS);
-        if v.is_empty() { words.clone() } else { v }
-    };
-
-    let SearchResult {
+    SearchResult {
         scores,
         win,
         words_remaining,
-    } = search(&words, &valid, threads, state);
-
-    if let Some(w) = win {
-        println!("Winning word found: {w}");
-        return;
     }
+}
 
-    let (ranking, (_, score)) = if let Some(s) = scores.iter().enumerate().find(|(idx, e)| e.0 == word) { s } else {
-        println!("Word is an invalid word!");
-        return;
-    };
+fn handle_calc_word(search_result: &SearchResult, word: Word) {
+    let SearchResult {
+        scores,
+        win: _,
+        words_remaining,
+    } = search_result;
+
+    let (ranking, (_, score)) =
+        if let Some(s) = scores.iter().enumerate().find(|(_idx, e)| e.0 == word) {
+            s
+        } else {
+            println!("{} is an invalid word!", word);
+            return;
+        };
     let score = *score;
 
     println!();
-    println!("\"{}\" has a score of {} and is ranked {}", word, score, ranking + 1);
+    println!("Stats for \"{}\"", word);
+    println!("Score: {}", score);
+    println!("Rank: {}/{}", ranking + 1, scores.len());
     println!(
-        "on average the word eliminates {} out of {} remaining possible words",
-        words_remaining - (words_remaining as f64 / (2.0f64.powf(score))).ceil() as usize,
-        words_remaining
+        "Avg # of possible words eliminated: {}",
+        words_remaining - (*words_remaining as f64 / (2.0f64.powf(score))).ceil() as usize
     );
 }
 
@@ -536,15 +553,27 @@ fn handle_merge() {
     println!("{}", new_state.serialize());
 }
 
+fn get_stdin(buffer: &mut String) {
+    buffer.clear();
+    std::io::stdin().read_line(buffer).unwrap();
+}
+
 fn handle_run() {
     let mut buffer = String::new();
     let mut state = MatchState::empty();
+    let mut last_search_result = SearchResult {
+        scores: vec![],
+        win: None,
+        words_remaining: usize::MAX,
+    };
+
     loop {
         println!();
         println!("(a) Add info");
         println!("(v) View state");
         println!("(c) Calc");
-        println!("(w) Calculate stats for a word");
+        println!("(w) Show stats for a word");
+        println!("(l) List computed scores");
         println!("(r) Reset");
         println!("(q) Quit");
         println!("Enter input:");
@@ -559,8 +588,7 @@ fn handle_run() {
         match choice {
             'a' => {
                 println!("Enter new info: ");
-                buffer.clear();
-                std::io::stdin().read_line(&mut buffer).unwrap();
+                get_stdin(&mut buffer);
                 let wm = WordMatch::deserialize(&buffer);
                 state = MatchComb {
                     state: &state,
@@ -572,16 +600,57 @@ fn handle_run() {
                 println!("Current state: {}", state.serialize());
             }
             'c' => {
-                handle_calc(&state);
+                last_search_result = handle_calc(&state);
             }
             'w' => {
-                println!("Enter word to calculate:");
-                buffer.clear();
-                std::io::stdin().read_line(&mut buffer).unwrap();
+                if last_search_result.words_remaining == usize::MAX {
+                    println!("Compute scores first!");
+                    return;
+                }
+                
+                println!("Enter word to calculate its score:");
+                get_stdin(&mut buffer);
                 let mut s = [0; WORD_LENGTH];
                 s.copy_from_slice(buffer.trim().as_bytes());
                 let word = Word(s);
-                handle_calc_word(&state, word);
+                handle_calc_word(&last_search_result, word);
+            }
+            'l' => {
+                if last_search_result.words_remaining == usize::MAX {
+                    println!("Compute scores first!");
+                    return;
+                }
+                println!("Range of scores to view:");
+                get_stdin(&mut buffer);
+                let (left, right) = if let Some(x) = buffer.trim().split_once('-') {
+                    x
+                } else {
+                    println!("Insert a range e.g. 1-50!");
+                    continue;
+                };
+                let (left, right) = (
+                    match left.parse::<usize>() {
+                        Ok(x) => x,
+                        _ => {
+                            println!("Insert a range with a valid positive integer!");
+                            continue;
+                        }
+                    },
+                    match right.parse::<usize>() {
+                        Ok(x) => x,
+                        _ => {
+                            println!("Insert a range with a valid positive integer!");
+                            continue;
+                        }
+                    },
+                );
+                if left == 0 {
+                    println!("Insert a valid range!");
+                }
+                for i in (left - 1)..right {
+                    let (word, score) = last_search_result.scores[i];
+                    println!("{}. {} {:.3}", i + 1, word, score)
+                }
             }
             'r' => {
                 state = MatchState::empty();
@@ -603,9 +672,9 @@ fn main() {
         Some(("merge", _subm)) => handle_merge(),
         Some(("calc", _subm)) => {
             let mut buffer = String::new();
-            std::io::stdin().read_to_string(&mut buffer).unwrap();
+            get_stdin(&mut buffer);
             let state = MatchState::deserialize(&buffer);
-            handle_calc(&state)
+            handle_calc(&state);
         }
         Some(("run", _subm)) => handle_run(),
         _ => {}
